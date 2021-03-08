@@ -20,6 +20,7 @@ def build_shared_mlp(mlp_spec: List[int], bn: bool = True):
 
 
 class _PointnetSAModuleBase(nn.Module):
+    # set abstraction module, down sampling
     def __init__(self):
         super(_PointnetSAModuleBase, self).__init__()
         self.npoint = None
@@ -47,7 +48,7 @@ class _PointnetSAModuleBase(nn.Module):
 
         new_features_list = []
 
-        xyz_flipped = xyz.transpose(1, 2).contiguous()
+        xyz_flipped = xyz.transpose(1, 2).contiguous() # shape (B,3,N)
         new_xyz = (
             pointnet2_utils.gather_operation(
                 xyz_flipped, pointnet2_utils.furthest_point_sample(xyz, self.npoint)
@@ -57,11 +58,12 @@ class _PointnetSAModuleBase(nn.Module):
             if self.npoint is not None
             else None
         )
+        # shape (B, npoint, 3)
 
         for i in range(len(self.groupers)):
             new_features = self.groupers[i](
                 xyz, new_xyz, features
-            )  # (B, C, npoint, nsample)
+            )  # (B, C+3, npoint, nsample)
 
             new_features = self.mlps[i](new_features)  # (B, mlp[-1], npoint, nsample)
             new_features = F.max_pool2d(
@@ -182,6 +184,13 @@ class PointnetFPModule(nn.Module):
             (B, mlp[-1], n) tensor of the features of the unknown features
         """
 
+        # known_feats are features at positions specified at known
+        # unknow_feats are features at positions specified at unknown
+        # unknow_feats features at the positons unknown obtained in the encoder
+
+        # we first interpolate known_feats to interpolated_feats at positions unknown
+        # then concat interpolated_feats with unknow_feats to get new_features
+        # then new_features is put through a pointnet 
         if known is not None:
             dist, idx = pointnet2_utils.three_nn(unknown, known)
             dist_recip = 1.0 / (dist + 1e-8)
@@ -207,3 +216,59 @@ class PointnetFPModule(nn.Module):
         new_features = self.mlp(new_features)
 
         return new_features.squeeze(-1)
+
+
+import pdb
+if __name__ == '__main__':
+    B = 32
+    N = 1024
+    C = 0
+
+    sa = PointnetSAModule(
+            npoint=512,
+            radius=0.2,
+            nsample=64,
+            mlp=[C, 64, 64, 128],
+            use_xyz=True)
+
+    # sa = PointnetSAModule(
+    #         mlp=[C, 64, 64, 128],
+    #         use_xyz=True)
+    
+    
+    xyz = torch.rand(B, N, 3) 
+    features = torch.rand(B, C, N)
+
+    device = torch.device('cuda:0')
+    sa.to(device)
+    xyz = xyz.to(device)
+    features = features.to(device)
+    # xyz is of shape (B,N,3)
+    # features is of shape (B,C,N)
+    # the first element of mlp in sa must be C
+    new_xyz, new_f = sa(xyz, features)
+    # new_xyz is of shape (B, npoints, 3)
+    # new_f is of shape (B, mlp[-1], npoints)
+    # we can simply set C=0 if we don't want features as the input
+
+    # if npoint=None, radius=None, nsample=None in sa
+    # then new_xyz will be None, and new_f will be of shape (B, mlp[-1], 1)
+    pdb.set_trace()
+    B = 32
+    n = 512
+    m = 256
+    C2 = 128
+    C1 = 64
+
+    known = torch.rand(B, m, 3).to(device)
+    known_feats = torch.rand(B, C2, m).to(device)
+    unknown = torch.rand(B, n, 3).to(device)
+    unknow_feats = torch.rand(B, C1, n).to(device)
+    fp = PointnetFPModule([C1+C2, 64, 32])
+    fp.to(device)
+
+    new_fea = fp(unknown, known, unknow_feats, known_feats)
+    # new_fea is of shape (B, mlp[-1], n) 
+
+    pdb.set_trace()
+    
