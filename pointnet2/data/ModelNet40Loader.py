@@ -140,7 +140,7 @@ class ModelNet40Cls(data.Dataset):
     def set_num_points(self, pts):
         self.num_points = min(int(1e4), pts)
 
-
+import pdb
 if __name__ == "__main__":
     from torchvision import transforms
     import data_utils as d_utils
@@ -154,8 +154,15 @@ if __name__ == "__main__":
             d_utils.PointcloudJitter(),
         ]
     )
-    dset = ModelNet40Cls(16, train=True, transforms=transforms)
-    print(dset[0][0])
-    print(dset[0][1])
-    print(len(dset))
+    dset = ModelNet40Cls(1024, train=True, transforms=transforms)
+    print('single data shape:', dset[0][0].shape)
+    print('single label:', dset[0][1])
+    print('number samples:', len(dset))
+    pdb.set_trace()
     dloader = torch.utils.data.DataLoader(dset, batch_size=32, shuffle=True)
+    for i, (data, label) in enumerate(dloader):
+        print('[%d/%d] %.3f' % (i, len(dloader), i/len(dloader)))
+        # data is of shape (batch, npoints, 6)
+        # label is of shape (batch)
+    print('batch data shape:', data.shape)
+    print('batch label shape:', label.shape)
